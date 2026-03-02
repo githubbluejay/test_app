@@ -8,6 +8,7 @@ Run with:  streamlit run maxsold_scanner.py
 """
 
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -28,6 +29,7 @@ from maxsold_api import (
 
 EBAY_FEE_RATE = 0.1325   # 13.25% eBay final value fee
 CLAUDE_MODEL = "claude-opus-4-6"
+SOCIAL_MODEL = "claude-haiku-4-5-20251001"  # fast/cheap for post copy
 ITEMS_PER_BATCH = 15     # items sent per Claude API call
 
 CITY_COORDS: dict[str, str] = {
@@ -211,6 +213,17 @@ with st.sidebar:
     )
 
     st.markdown("---")
+    st.markdown("**Referral & sharing**")
+    referral_code = st.text_input(
+        "MaxSold referral code",
+        placeholder="your-referral-code",
+        help=(
+            "Your MaxSold referral code. Appended to every item link as "
+            "?ref=CODE so sign-ups are tracked back to you."
+        ),
+    )
+
+    st.markdown("---")
     st.markdown("**Category filter** (blank = all)")
     categories_filter = st.multiselect(
         "",
@@ -240,6 +253,11 @@ def _field(d: dict, *keys, default=None):
     return default
 
 
+def _ref_suffix(referral_code: str) -> str:
+    """Return '?ref=CODE' if a referral code is set, else empty string."""
+    return f"?ref={referral_code}" if referral_code else ""
+
+
 def fetch_items_from_auctions(
     session: requests.Session,
     app_id: str,
@@ -247,6 +265,7 @@ def fetch_items_from_auctions(
     n_auctions: int,
     location: str,
     radius_km: int = 50,
+    referral_code: str = "",
 ) -> list[dict]:
     """Fetch all items across the nearest n_auctions within radius_km of location."""
     auctions = search_auctions(
@@ -256,6 +275,7 @@ def fetch_items_from_auctions(
         hits_per_page=n_auctions,
     )
 
+    ref = _ref_suffix(referral_code)
     all_items: list[dict] = []
     for auction in auctions:
         auction_id    = _field(auction, "objectID", "id")
@@ -288,7 +308,7 @@ def fetch_items_from_auctions(
                 "auction_province": auction_prov,
                 "auction_end":      auction_end,
                 "auction_url":      auction_url,
-                "item_url":         f"{auction_url}/items/{item_id}",
+                "item_url":         f"{auction_url}/items/{item_id}{ref}",
             })
 
     return all_items
@@ -307,11 +327,8 @@ def analyze_batch(client: anthropic.Anthropic, batch: list[dict]) -> list[dict]:
         messages=[{"role": "user", "content": VALUATION_PROMPT + items_text}],
     )
     raw = msg.content[0].text.strip()
-    # Strip markdown code fences if present
     if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
+        raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
     return json.loads(raw)
 
 
@@ -389,6 +406,64 @@ def enrich_with_ebay(
                 item["price_source"] = "AI estimate"
 
     return results
+
+
+SOCIAL_PROMPT = """\
+You write punchy social media deal alerts for estate sale flippers and bargain hunters.
+
+For each item, write TWO posts:
+1. "short" (≤ 240 chars including the link) — for Twitter/X or a quick Facebook share
+2. "long" (3–5 sentences) — for Facebook groups, Reddit r/flipping, or deal communities.
+   Append 3–5 relevant hashtags at the very end of the long post.
+
+Rules:
+- Tone: excited but honest. These are AI-estimated values, not guarantees.
+- Mention the current bid and estimated resale range to show the opportunity.
+- Include the exact link provided — do not modify it.
+- Do NOT invent details not given.
+
+Return a JSON array (same order as input), each element:
+  {"index": <int>, "short": "<text>", "long": "<text>"}
+
+IMPORTANT: Return ONLY the JSON array. No markdown fences, no explanation.
+
+Items:
+"""
+
+
+def generate_social_posts(
+    client: anthropic.Anthropic,
+    items: list[dict],
+    referral_code: str = "",
+) -> list[dict]:
+    """
+    Use Claude Haiku to write short + long social media posts for each item.
+    Returns a list of dicts with keys: index, short, long.
+    """
+    lines = []
+    for i, item in enumerate(items):
+        location = ", ".join(filter(None, [item.get("auction_city", ""),
+                                           item.get("auction_province", "")]))
+        link = item["item_url"]  # already contains ?ref= if set
+        lines.append(
+            f"{i}. {item['normalized_name']} | "
+            f"Bid: ${item['current_bid']:.0f} | "
+            f"Est. resale: ${item['resale_low']:.0f}–${item['resale_high']:.0f} | "
+            f"ROI: {item['roi']:+.0f}% | "
+            f"Ends: {item.get('auction_end', '?')} | "
+            f"Location: {location or 'Unknown'} | "
+            f"Link: {link}"
+        )
+
+    msg = client.messages.create(
+        model=SOCIAL_MODEL,
+        max_tokens=2048,
+        messages=[{"role": "user", "content": SOCIAL_PROMPT + "\n".join(lines)}],
+    )
+    raw = msg.content[0].text.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
+    return json.loads(raw)
 
 
 def _liq_label(score: int) -> str:
@@ -504,6 +579,7 @@ if scan_clicked:
         all_items = fetch_items_from_auctions(
             session, creds["app_id"], creds["api_key"],
             max_auctions, location_str, radius_km,
+            referral_code=referral_code,
         )
 
         if not all_items:
@@ -738,6 +814,61 @@ if st.session_state.get("top10") is not None:
             file_name="maxsold_opportunities.csv",
             mime="text/csv",
         )
+
+        # ── Social media posts ────────────────────────────────────────────────
+
+        st.markdown("---")
+        st.markdown("### 📣 Generate Deal Alert Posts")
+        st.caption(
+            "Uses Claude to write ready-to-copy social media posts for your top finds. "
+            + ("Links will include your referral code." if referral_code
+               else "Add your referral code in the sidebar to embed it in every link.")
+        )
+
+        n_posts = st.slider("Items to generate posts for", 1, min(5, len(top10)), 3)
+        gen_posts = st.button("Generate Posts", key="gen_posts")
+
+        if gen_posts:
+            if not anthropic_key:
+                st.error("Anthropic API key required.")
+            else:
+                with st.spinner("Writing posts with Claude..."):
+                    try:
+                        client_haiku = anthropic.Anthropic(api_key=anthropic_key)
+                        posts = generate_social_posts(
+                            client_haiku, top10[:n_posts], referral_code
+                        )
+                        st.session_state["social_posts"] = posts
+                    except Exception as exc:
+                        st.error(f"Post generation failed: {exc}")
+
+        if st.session_state.get("social_posts"):
+            posts = st.session_state["social_posts"]
+            for post in posts:
+                idx = post.get("index", 0)
+                item_name = top10[idx]["normalized_name"] if idx < len(top10) else f"Item {idx+1}"
+                with st.expander(f"#{idx+1} · {item_name}", expanded=True):
+                    col_s, col_l = st.columns(2)
+                    with col_s:
+                        st.markdown("**Twitter / X**")
+                        st.text_area(
+                            label="short_post",
+                            value=post.get("short", ""),
+                            height=120,
+                            label_visibility="collapsed",
+                            key=f"short_{idx}",
+                        )
+                        chars = len(post.get("short", ""))
+                        st.caption(f"{chars}/240 chars")
+                    with col_l:
+                        st.markdown("**Facebook / Reddit / Community**")
+                        st.text_area(
+                            label="long_post",
+                            value=post.get("long", ""),
+                            height=160,
+                            label_visibility="collapsed",
+                            key=f"long_{idx}",
+                        )
 
 else:
     # Welcome / explainer shown before first scan
