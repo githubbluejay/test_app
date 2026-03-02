@@ -70,21 +70,36 @@ element contains:
 not just "mixer")
 - "category": one of: Electronics, Furniture, Jewelry, Collectibles, Clothing, \
 Tools, Kitchen, Art, Books, Sports, Toys, Other
-- "estimated_resale_low": conservative USD resale (used/estate condition, as-is)
-- "estimated_resale_high": optimistic USD resale
+- "condition": one of: Excellent, Good, Fair, Poor — inferred from the item \
+description. Excellent=like new/complete; Good=normal used wear; \
+Fair=visible wear or missing accessories; Poor=damaged/parts only
+- "condition_notes": one short phrase explaining your condition assessment \
+(e.g. "described as working, no accessories listed")
+- "estimated_resale_low": conservative USD resale for this condition
+- "estimated_resale_high": optimistic USD resale for this condition
 - "estimated_shipping": typical USD shipping cost (0 for bulky furniture = \
 local pickup)
 - "liquidity_score": 1–10 (10=sells in 1-3 days, 7=1-2 weeks, 4=1 month, \
 1=3+ months)
 - "notes": one sentence on value/liquidity reasoning
 
-Assumptions: estate/used condition, seller pays eBay fees (~13.25%).
+Assumptions: seller pays eBay fees (~13.25%). Prices should already reflect \
+the condition you assigned — do NOT double-penalise.
 Be realistic/conservative — these are not collector-grade unless stated.
 
 IMPORTANT: Return ONLY the JSON array. No markdown fences, no explanation.
 
 Items:
 """
+
+# Multipliers applied to eBay comp prices (which assume "Good/Used") to
+# adjust for the item's actual condition as assessed by Claude.
+CONDITION_MULTIPLIERS = {
+    "Excellent": 1.15,
+    "Good":      1.00,
+    "Fair":      0.65,
+    "Poor":      0.30,
+}
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -355,8 +370,10 @@ def enrich_with_ebay(
             item["ebay_count"] = ebay["count"]
 
             if ebay["count"] >= 2:
-                item["resale_low"]      = ebay["low"]
-                item["resale_high"]     = ebay["high"]
+                # eBay Used comps assume "Good" condition — adjust for actual
+                mult = CONDITION_MULTIPLIERS.get(item.get("condition", "Good"), 1.0)
+                item["resale_low"]      = round(ebay["low"]  * mult, 2)
+                item["resale_high"]     = round(ebay["high"] * mult, 2)
                 item["liquidity_score"] = liquidity_from_comps(ebay["count"])
                 item["price_source"]    = f"eBay · {ebay['count']} comps"
                 # Recalculate all downstream scores with real prices
@@ -404,10 +421,25 @@ def render_card(rank: int, item: dict) -> None:
         src_badge = (f'<span style="font-size:0.7rem;background:#f1f5f9;color:#64748b;'
                      f'border-radius:4px;padding:1px 7px;margin-left:6px;">🤖 {source}</span>')
 
+    # Condition badge
+    condition = item.get("condition", "Good")
+    cond_colors = {
+        "Excellent": ("#dcfce7", "#166534"),
+        "Good":      ("#dbeafe", "#1e40af"),
+        "Fair":      ("#fef9c3", "#854d0e"),
+        "Poor":      ("#fee2e2", "#991b1b"),
+    }
+    cond_bg, cond_fg = cond_colors.get(condition, ("#f1f5f9", "#475569"))
+    cond_notes = item.get("condition_notes", "")
+    cond_title = f' title="{cond_notes}"' if cond_notes else ""
+    cond_badge = (f'<span style="font-size:0.7rem;background:{cond_bg};color:{cond_fg};'
+                  f'border-radius:4px;padding:1px 7px;margin-left:4px;cursor:default;"'
+                  f'{cond_title}>{condition}</span>')
+
     st.markdown(f"""
     <div class="opp-card">
       <div class="rank-badge {rank_cls}">#{rank}</div>
-      <div class="item-name">{item['normalized_name']}{src_badge}</div>
+      <div class="item-name">{item['normalized_name']}{src_badge}{cond_badge}</div>
       <div class="item-category">{item['category']}</div>
       <div class="metrics-row">
         <div class="metric">
@@ -520,15 +552,17 @@ if scan_clicked:
                 )
                 results.append({
                     **item,
-                    "normalized_name": val.get("normalized_name", item["raw_name"]),
-                    "category":        val.get("category", "Other"),
-                    "resale_low":      val.get("estimated_resale_low", 0),
-                    "resale_high":     val.get("estimated_resale_high", 0),
-                    "shipping":        val.get("estimated_shipping", 15.0),
-                    "liquidity_score": val.get("liquidity_score", 5),
-                    "notes":           val.get("notes", ""),
-                    "price_source":    "AI estimate",
-                    "ebay_count":      0,
+                    "normalized_name":  val.get("normalized_name", item["raw_name"]),
+                    "category":         val.get("category", "Other"),
+                    "condition":        val.get("condition", "Good"),
+                    "condition_notes":  val.get("condition_notes", ""),
+                    "resale_low":       val.get("estimated_resale_low", 0),
+                    "resale_high":      val.get("estimated_resale_high", 0),
+                    "shipping":         val.get("estimated_shipping", 15.0),
+                    "liquidity_score":  val.get("liquidity_score", 5),
+                    "notes":            val.get("notes", ""),
+                    "price_source":     "AI estimate",
+                    "ebay_count":       0,
                     **scores,
                 })
 

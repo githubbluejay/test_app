@@ -53,8 +53,14 @@ def search_sold_prices(
         "RESPONSE-DATA-FORMAT":          "JSON",
         "GLOBAL-ID":                     global_id,
         "keywords":                      keywords,
+        # Only sold listings
         "itemFilter(0).name":            "SoldItemsOnly",
         "itemFilter(0).value":           "true",
+        # Only Used condition (3000) — excludes New/Refurbished so comps
+        # reflect actual secondhand market prices, not retail competition.
+        "itemFilter(1).name":            "Condition",
+        "itemFilter(1).value(0)":        "3000",  # Used
+        "itemFilter(1).value(1)":        "7000",  # For parts / not working
         "sortOrder":                     "EndTimeSoonest",
         "paginationInput.entriesPerPage": min(max_results, 100),
     }
