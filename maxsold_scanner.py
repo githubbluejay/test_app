@@ -9,6 +9,7 @@ Run with:  streamlit run maxsold_scanner.py
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import anthropic
 import pandas as pd
@@ -16,6 +17,7 @@ import plotly.express as px
 import requests
 import streamlit as st
 
+from ebay_api import liquidity_from_comps, search_sold_prices
 from maxsold_api import (
     extract_algolia_credentials,
     get_auction_items,
@@ -145,7 +147,16 @@ with st.sidebar:
         "Anthropic API Key",
         type="password",
         placeholder="sk-ant-...",
-        help="Required for AI resale estimates. Get one at console.anthropic.com",
+        help="Required for item identification and fallback pricing. console.anthropic.com",
+    )
+
+    ebay_app_id = st.text_input(
+        "eBay App ID (optional)",
+        placeholder="YourApp-XXXX-XXXX-...",
+        help=(
+            "If provided, replaces Claude's estimates with real eBay sold prices. "
+            "Free: developer.ebay.com → My Account → Application Keysets → App ID (Client ID)"
+        ),
     )
 
     st.markdown("---")
@@ -301,6 +312,43 @@ def score_item(
     }
 
 
+def enrich_with_ebay(results: list[dict], ebay_app_id: str) -> list[dict]:
+    """
+    Fetch eBay sold comps for every result in parallel and update pricing in-place.
+
+    Items with ≥ 2 comps get their resale_low/high and liquidity_score replaced
+    with real market data. Items with 0–1 comps keep Claude's estimates.
+    """
+    def _fetch(idx: int, item: dict) -> tuple[int, dict]:
+        return idx, search_sold_prices(ebay_app_id, item["normalized_name"])
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {pool.submit(_fetch, i, r): i for i, r in enumerate(results)}
+        for future in as_completed(futures):
+            idx, ebay = future.result()
+            item = results[idx]
+            item["ebay_count"] = ebay["count"]
+
+            if ebay["count"] >= 2:
+                item["resale_low"]      = ebay["low"]
+                item["resale_high"]     = ebay["high"]
+                item["liquidity_score"] = liquidity_from_comps(ebay["count"])
+                item["price_source"]    = f"eBay · {ebay['count']} comps"
+                # Recalculate all downstream scores with real prices
+                updated = score_item(
+                    item["current_bid"],
+                    item["resale_low"],
+                    item["resale_high"],
+                    item["shipping"],
+                    item["liquidity_score"],
+                )
+                item.update(updated)
+            else:
+                item["price_source"] = "AI estimate"
+
+    return results
+
+
 def _liq_label(score: int) -> str:
     if score >= 7: return "High"
     if score >= 4: return "Medium"
@@ -322,10 +370,19 @@ def render_card(rank: int, item: dict) -> None:
     location  = ", ".join(filter(None, [item.get("auction_city", ""),
                                         item.get("auction_province", "")]))
 
+    # Price source badge
+    source = item.get("price_source", "AI estimate")
+    if source.startswith("eBay"):
+        src_badge = (f'<span style="font-size:0.7rem;background:#dcfce7;color:#166534;'
+                     f'border-radius:4px;padding:1px 7px;margin-left:6px;">📊 {source}</span>')
+    else:
+        src_badge = (f'<span style="font-size:0.7rem;background:#f1f5f9;color:#64748b;'
+                     f'border-radius:4px;padding:1px 7px;margin-left:6px;">🤖 {source}</span>')
+
     st.markdown(f"""
     <div class="opp-card">
       <div class="rank-badge {rank_cls}">#{rank}</div>
-      <div class="item-name">{item['normalized_name']}</div>
+      <div class="item-name">{item['normalized_name']}{src_badge}</div>
       <div class="item-category">{item['category']}</div>
       <div class="metrics-row">
         <div class="metric">
@@ -445,8 +502,18 @@ if scan_clicked:
                     "shipping":        val.get("estimated_shipping", 15.0),
                     "liquidity_score": val.get("liquidity_score", 5),
                     "notes":           val.get("notes", ""),
+                    "price_source":    "AI estimate",
+                    "ebay_count":      0,
                     **scores,
                 })
+
+        # ── Optional eBay enrichment ─────────────────────────────────────────
+        if ebay_app_id and results:
+            progress.progress(72, text=f"Fetching eBay sold comps for {len(results)} items (parallel)...")
+            status.info("Looking up real eBay sold prices — this runs in parallel and takes ~15 s...")
+            results = enrich_with_ebay(results, ebay_app_id)
+            ebay_hits = sum(1 for r in results if r["price_source"] != "AI estimate")
+            status.info(f"eBay data found for {ebay_hits}/{len(results)} items.")
 
         progress.progress(85, text="Ranking opportunities...")
 
@@ -621,9 +688,10 @@ else:
 
 1. Fetches live auctions near your chosen city from MaxSold
 2. Retrieves all items with their current bids
-3. Uses Claude AI to identify each item and estimate resale value (eBay / FB Marketplace)
-4. Calculates ROI after eBay fees (13.25%) and estimated shipping
-5. Ranks items by an **Opportunity Score** = ROI × liquidity weight
+3. Uses Claude AI to identify/normalize each item name and estimate resale value
+4. *(If eBay App ID provided)* Fetches real sold comps from eBay in parallel — replaces AI estimates where ≥ 2 comps exist
+5. Calculates ROI after eBay fees (13.25%) and estimated shipping
+6. Ranks items by an **Opportunity Score** = ROI × liquidity weight
 
 **Scoring**
 
