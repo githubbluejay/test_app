@@ -103,6 +103,7 @@ def search_auctions(
     api_key: str,
     query: str = "",
     location: str = "",
+    radius_km: int = 160,
     page: int = 0,
     hits_per_page: int = 5,
 ) -> list:
@@ -110,9 +111,10 @@ def search_auctions(
     Search for live MaxSold auctions via Algolia.
 
     Args:
-        query:    Free-text search term (e.g. 'furniture', 'estate').
-        location: Lat/lng string, e.g. '43.6532,-79.3832' (Toronto).
-        page:     Page number (0-indexed).
+        query:         Free-text search term (e.g. 'furniture', 'estate').
+        location:      Lat/lng string, e.g. '43.6532,-79.3832' (Toronto).
+        radius_km:     Search radius in kilometres (default 160 km).
+        page:          Page number (0-indexed).
         hits_per_page: Results per page.
 
     Returns:
@@ -120,7 +122,8 @@ def search_auctions(
     """
     params = f"query={requests.utils.quote(query)}&hitsPerPage={hits_per_page}&page={page}"
     if location:
-        params += f"&aroundLatLng={requests.utils.quote(location)}&aroundRadius=160000"
+        radius_m = radius_km * 1000
+        params += f"&aroundLatLng={requests.utils.quote(location)}&aroundRadius={radius_m}"
 
     payload = {"requests": [{"indexName": "auction", "params": params}]}
     url = ALGOLIA_SEARCH_URL.format(app_id=app_id)

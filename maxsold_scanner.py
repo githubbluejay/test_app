@@ -161,6 +161,10 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**Scan settings**")
     max_auctions = st.slider("Auctions to scan", 1, 10, 3)
+    radius_km = st.slider(
+        "Search radius (km)", 5, 500, 50,
+        help="How far from the selected city to look for auctions. 15 = within 15 km.",
+    )
 
     min_bid = st.number_input("Min current bid ($)", min_value=0, value=0, step=5)
     max_bid = st.number_input("Max current bid ($)", min_value=1, value=500, step=25)
@@ -206,11 +210,13 @@ def fetch_items_from_auctions(
     api_key: str,
     n_auctions: int,
     location: str,
+    radius_km: int = 50,
 ) -> list[dict]:
-    """Fetch all items across the nearest n_auctions to location."""
+    """Fetch all items across the nearest n_auctions within radius_km of location."""
     auctions = search_auctions(
         session, app_id, api_key,
         location=location,
+        radius_km=radius_km,
         hits_per_page=n_auctions,
     )
 
@@ -380,10 +386,10 @@ if scan_clicked:
         progress.progress(10, text="Connected. Fetching auctions...")
 
         # 2. Fetch items across nearby auctions
-        status.info(f"Scanning {max_auctions} auction(s) near {location_str}...")
+        status.info(f"Scanning {max_auctions} auction(s) within {radius_km} km of {location_str}...")
         all_items = fetch_items_from_auctions(
             session, creds["app_id"], creds["api_key"],
-            max_auctions, location_str,
+            max_auctions, location_str, radius_km,
         )
 
         if not all_items:
