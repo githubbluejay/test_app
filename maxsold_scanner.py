@@ -159,6 +159,16 @@ with st.sidebar:
         ),
     )
 
+    ebay_site = st.radio(
+        "eBay market",
+        options=["Canada (CAD)", "US (USD)", "Both"],
+        index=0,
+        help="Canada is most relevant for MaxSold buyers. 'Both' searches each and takes the higher comp count.",
+        horizontal=True,
+    )
+    _EBAY_SITE_MAP = {"Canada (CAD)": ["EBAY-ENCA"], "US (USD)": ["EBAY-US"], "Both": ["EBAY-ENCA", "EBAY-US"]}
+    ebay_global_ids = _EBAY_SITE_MAP[ebay_site]
+
     st.markdown("---")
     st.markdown("**Location**")
     loc_mode = st.radio("", ["Select city", "Custom coordinates"],
@@ -312,15 +322,30 @@ def score_item(
     }
 
 
-def enrich_with_ebay(results: list[dict], ebay_app_id: str) -> list[dict]:
+def enrich_with_ebay(
+    results: list[dict],
+    ebay_app_id: str,
+    global_ids: list[str] | None = None,
+) -> list[dict]:
     """
     Fetch eBay sold comps for every result in parallel and update pricing in-place.
 
     Items with ≥ 2 comps get their resale_low/high and liquidity_score replaced
     with real market data. Items with 0–1 comps keep Claude's estimates.
+    When multiple global_ids are provided (e.g. EBAY-ENCA + EBAY-US), results
+    from the site with the highest comp count win.
     """
+    if global_ids is None:
+        global_ids = ["EBAY-ENCA"]
+
     def _fetch(idx: int, item: dict) -> tuple[int, dict]:
-        return idx, search_sold_prices(ebay_app_id, item["normalized_name"])
+        candidates = [
+            search_sold_prices(ebay_app_id, item["normalized_name"], global_id=gid)
+            for gid in global_ids
+        ]
+        # prefer whichever site returned more comps
+        best = max(candidates, key=lambda r: r["count"])
+        return idx, best
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         futures = {pool.submit(_fetch, i, r): i for i, r in enumerate(results)}
@@ -511,7 +536,7 @@ if scan_clicked:
         if ebay_app_id and results:
             progress.progress(72, text=f"Fetching eBay sold comps for {len(results)} items (parallel)...")
             status.info("Looking up real eBay sold prices — this runs in parallel and takes ~15 s...")
-            results = enrich_with_ebay(results, ebay_app_id)
+            results = enrich_with_ebay(results, ebay_app_id, global_ids=ebay_global_ids)
             ebay_hits = sum(1 for r in results if r["price_source"] != "AI estimate")
             status.info(f"eBay data found for {ebay_hits}/{len(results)} items.")
 
