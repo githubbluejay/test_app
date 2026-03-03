@@ -72,6 +72,7 @@ def test_connection(session: requests.Session, x_api_key: str,
     params = {
         "saleState": "open", "searchType": "live", "pageNumber": 1, "limit": 1,
         "lat": lat.strip(), "lng": lng.strip(), "radiusMetres": 160_000,
+        "country": "CA",
     }
 
     print(f"[*] Testing connection to: {url}")
@@ -93,17 +94,21 @@ def search_auctions(
     query: str = "",
     location: str = "",
     radius_km: int = 160,
+    country: str = "CA",
     page: int = 1,
     hits_per_page: int = 5,
 ) -> list:
     """
     Search for live MaxSold auctions via their REST API.
 
+    NOTE: location (lat/lng) is required — the API returns [] without it.
+
     Args:
         x_api_key:     API key from /__ENV.js (NEXT_PUBLIC_X_API_KEY).
         query:         Free-text search term (e.g. 'furniture', 'estate').
         location:      Lat/lng string, e.g. '43.6532,-79.3832' (Toronto).
         radius_km:     Search radius in kilometres (default 160 km).
+        country:       ISO country code — "CA" or "US" (default "CA").
         page:          Page number (1-indexed).
         hits_per_page: Results per page.
 
@@ -115,6 +120,7 @@ def search_auctions(
         "searchType": "live",
         "pageNumber": page,
         "limit":      hits_per_page,
+        "country":    country,
     }
     if location:
         lat, lng = location.split(",", 1)
@@ -193,8 +199,24 @@ def main():
     )
 
     if not auctions:
-        print("[-] No auctions returned.")
-        print("    Tip: try a different lat/lng or increase radius_km.")
+        print("[-] No auctions returned. Probing param variants for debugging...\n")
+        hdrs = build_api_headers(x_api_key)
+        url  = f"{MAXSOLD_API_BASE}/auctions"
+        probes = [
+            {"saleState": "open", "country": "CA"},
+            {"saleState": "open", "country": "US"},
+            {"saleState": "open", "lat": "43.6532", "lng": "-79.3832",
+             "radiusMetres": 500_000, "country": "CA"},
+            {"saleState": "open", "lat": "43.6532", "lng": "-79.3832",
+             "radiusMetres": 500_000, "country": "US"},
+            {"lat": "43.6532", "lng": "-79.3832", "radiusMetres": 500_000},
+            {},
+        ]
+        for p in probes:
+            r = session.get(url, headers=hdrs, params=p, timeout=15)
+            body = r.text[:120].replace("\n", " ")
+            print(f"  params={p}")
+            print(f"  → HTTP {r.status_code}  body={body!r}\n")
         return
 
     print(f"[+] Found {len(auctions)} auction(s):\n")
