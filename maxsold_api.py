@@ -56,6 +56,11 @@ def build_api_headers(x_api_key: str) -> dict:
     return {
         **HEADERS,
         "x-api-key": x_api_key,
+        # The browser's axios interceptor always injects this origin header.
+        # The server silently returns [] for requests without it.
+        "Origin":  "https://maxsold.com",
+        "Referer": "https://maxsold.com/",
+        "Accept":  "application/json",
     }
 
 
