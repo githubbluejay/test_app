@@ -26,102 +26,125 @@ HEADERS = {
 }
 
 
-def get_js_bundle_url(session: requests.Session) -> str:
-    """Fetch the MaxSold homepage and extract the main JS bundle URL."""
+def _candidate_bundle_urls(session: requests.Session) -> list:
+    """
+    Return a prioritised list of JS URLs to search for Algolia credentials.
+
+    MaxSold now runs on Next.js.  The credentials live somewhere in the
+    chunked bundles, NOT in main-*.js (which is just webpack polyfills).
+    Search order (most likely first):
+      1. /__ENV.js  — Next.js pattern for exposing env-vars to the browser
+      2. pages/_app-*.js — app-wide initialisation; Algolia config goes here
+      3. pages/index-*.js — homepage bundle
+      4. Numbered chunks (e.g. 4867-abc.js) — code-split feature bundles
+      5. Everything else on the page
+    """
     resp = session.get(MAXSOLD_HOME, headers=HEADERS, timeout=15)
     resp.raise_for_status()
-
     html = resp.text
 
-    # CRA-style: src="/main.abc123.js"
-    match = re.search(r'src="(/main\.[a-f0-9]+\.js)"', html)
-    if not match:
-        # Vite-style: src="/assets/index-abc123.js"
-        match = re.search(r'src="(/assets/index-[^"]+\.js)"', html)
-    if not match:
-        # Vite-style with hash in filename: /assets/SomeName-abc12345.js
-        match = re.search(r'src="(/assets/[^"]*-[a-f0-9]{8,}\.[^"]*\.js)"', html)
-    if not match:
-        # Any script tag whose path contains "main"
-        match = re.search(r'src="(/[^"]*main[^"]*\.js)"', html)
-    if not match:
-        # Last resort: any hashed JS bundle referenced in a script tag
-        match = re.search(r'src="(/[^"]+\.[a-f0-9]{8,}\.js)"', html)
-    if not match:
-        raise RuntimeError("Could not locate main JS bundle on MaxSold homepage.")
+    srcs = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', html)
 
-    path = match.group(1)
-    return path if path.startswith("http") else MAXSOLD_HOME + path
+    def priority(src):
+        if "_app" in src:
+            return 0
+        if "pages/index" in src:
+            return 1
+        if re.search(r'/\d+-[a-f0-9]+\.js', src):   # numbered chunks
+            return 2
+        if "main" in src:
+            return 10   # main-*.js is usually just polyfills — low priority
+        return 5
+
+    srcs.sort(key=priority)
+
+    candidates = [MAXSOLD_HOME + "/__ENV.js"]       # check env-var file first
+    for src in srcs:
+        url = src if src.startswith("http") else MAXSOLD_HOME + src
+        candidates.append(url)
+    return candidates
 
 
 def extract_algolia_credentials(session: requests.Session) -> dict:
     """
-    Download MaxSold's main JS bundle and parse out the Algolia
-    application ID and search API key embedded in the bundle.
+    Search MaxSold's JS bundles for embedded Algolia credentials.
 
-    Multiple patterns are tried in order to handle bundle format changes.
-    Algolia app IDs are 8-12 uppercase alphanumeric chars; search API keys
-    are 32 lowercase hex chars.
+    MaxSold uses Next.js; credentials may appear in /__ENV.js, the
+    pages/_app chunk, or one of the numbered code-split chunks.
+    Multiple regex patterns are tried per file to handle minification
+    and variable-name changes.
     """
-    print("[*] Fetching MaxSold homepage to find JS bundle...")
-    js_url = get_js_bundle_url(session)
-    print(f"[*] Downloading JS bundle: {js_url}")
-
-    resp = session.get(js_url, headers=HEADERS, timeout=30)
-    resp.raise_for_status()
-    js_text = resp.text
-
-    # --- App ID patterns (most-specific to most-general) ---
+    # --- App ID patterns ---
     APP_ID_PATTERNS = [
-        # Named variables (original)
+        # Next.js public env-var style (/__ENV.js or inlined)
+        r'NEXT_PUBLIC_ALGOLIA_APP_ID["\']?\s*[=:]\s*["\']([^"\']+)["\']',
+        r'"NEXT_PUBLIC_ALGOLIA_APP_ID"\s*:\s*"([^"]+)"',
+        # Named variables (previous bundle format)
         r'algoliaApplicationId\s*[=:]\s*["\']([^"\']+)["\']',
         r'algoliaAppId\s*[=:]\s*["\']([^"\']+)["\']',
         r'ALGOLIA_APP_ID\s*[=:]\s*["\']([^"\']+)["\']',
         r'"ALGOLIA_APP_ID"\s*:\s*"([^"]+)"',
-        # Minified object literal: appId:"ABCDE12345"
-        # Algolia app IDs are uppercase alphanumeric, typically 10 chars.
+        # Minified: appId:"ABCDE12345" (Algolia IDs are ~10 uppercase alphanumeric)
         r'appId\s*:\s*["\']([A-Z0-9]{8,12})["\']',
         r'"appId"\s*:\s*"([A-Z0-9]{8,12})"',
     ]
 
     # --- API key patterns ---
     API_KEY_PATTERNS = [
-        # Named variables (original)
+        # Next.js public env-var style
+        r'NEXT_PUBLIC_ALGOLIA_SEARCH_KEY["\']?\s*[=:]\s*["\']([^"\']+)["\']',
+        r'"NEXT_PUBLIC_ALGOLIA_SEARCH_KEY"\s*:\s*"([^"]+)"',
+        r'NEXT_PUBLIC_ALGOLIA_API_KEY["\']?\s*[=:]\s*["\']([^"\']+)["\']',
+        r'"NEXT_PUBLIC_ALGOLIA_API_KEY"\s*:\s*"([^"]+)"',
+        # Named variables (previous bundle format)
         r'algoliaSearchAPIKey\s*[=:]\s*["\']([^"\']+)["\']',
         r'algoliaApiKey\s*[=:]\s*["\']([^"\']+)["\']',
         r'ALGOLIA_SEARCH_KEY\s*[=:]\s*["\']([^"\']+)["\']',
         r'ALGOLIA_API_KEY\s*[=:]\s*["\']([^"\']+)["\']',
         r'"ALGOLIA_API_KEY"\s*:\s*"([^"]+)"',
-        # Minified object literal: apiKey:"abc123..."
-        # Algolia search keys are exactly 32 lowercase hex chars.
+        # Minified: apiKey:"abc123..." (Algolia search keys are 32 hex chars)
         r'apiKey\s*:\s*["\']([a-f0-9]{32})["\']',
         r'"apiKey"\s*:\s*"([a-f0-9]{32})"',
     ]
 
-    app_id_match = None
-    for pattern in APP_ID_PATTERNS:
-        app_id_match = re.search(pattern, js_text)
-        if app_id_match:
-            print(f"[*] App ID matched with pattern: {pattern}")
-            break
+    print("[*] Fetching MaxSold homepage to find JS bundles...")
+    urls = _candidate_bundle_urls(session)
 
-    api_key_match = None
-    for pattern in API_KEY_PATTERNS:
-        api_key_match = re.search(pattern, js_text)
-        if api_key_match:
-            print(f"[*] API key matched with pattern: {pattern}")
-            break
+    for js_url in urls:
+        print(f"[*] Searching: {js_url}")
+        try:
+            resp = session.get(js_url, headers=HEADERS, timeout=30)
+            resp.raise_for_status()
+        except Exception as exc:
+            print(f"    (skipped: {exc})")
+            continue
 
-    if not app_id_match or not api_key_match:
-        raise RuntimeError(
-            "Could not extract Algolia credentials from JS bundle. "
-            "MaxSold may have changed their bundle format."
-        )
+        js_text = resp.text
 
-    return {
-        "app_id": app_id_match.group(1),
-        "api_key": api_key_match.group(1),
-    }
+        app_id_match = None
+        for pattern in APP_ID_PATTERNS:
+            app_id_match = re.search(pattern, js_text)
+            if app_id_match:
+                print(f"    app_id matched via: {pattern}")
+                break
+
+        api_key_match = None
+        for pattern in API_KEY_PATTERNS:
+            api_key_match = re.search(pattern, js_text)
+            if api_key_match:
+                print(f"    api_key matched via: {pattern}")
+                break
+
+        if app_id_match and api_key_match:
+            return {
+                "app_id": app_id_match.group(1),
+                "api_key": api_key_match.group(1),
+            }
+
+    raise RuntimeError(
+        "Could not extract Algolia credentials from JS bundle. "
+        "MaxSold may have changed their bundle format."
+    )
 
 
 def build_algolia_headers(app_id: str, api_key: str) -> dict:
