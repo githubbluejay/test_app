@@ -277,11 +277,11 @@ def fetch_items_from_auctions(
     ref = _ref_suffix(referral_code)
     all_items: list[dict] = []
     for auction in auctions:
-        auction_id    = _field(auction, "amAuctionId", "objectID", "id")
+        auction_id    = _field(auction, "id", "amAuctionId", "objectID")
         auction_title = _field(auction, "title", "name", default="Unknown Auction")
         auction_city  = _field(auction, "city", default="")
         auction_prov  = _field(auction, "province", "state", default="")
-        auction_end   = _field(auction, "endDate", "end_date", "end", default="")
+        auction_end   = _field(auction, "ends", "endDate", "end_date", "end", default="")
         auction_url   = f"https://www.maxsold.com/auctions/{auction_id}"
 
         try:

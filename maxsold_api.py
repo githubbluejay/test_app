@@ -81,7 +81,7 @@ def test_connection(session: requests.Session, x_api_key: str,
     }
 
     print(f"[*] Testing connection to: {url}")
-    resp = session.get(url, headers=headers, params=params, timeout=15)
+    resp = session.post(url, headers=headers, json=params, timeout=15)
 
     if resp.status_code == 200:
         data = resp.json()
@@ -208,58 +208,23 @@ def main():
     )
 
     if not auctions:
-        print("[-] No auctions returned. Probing method/path variants...\n")
-        hdrs = build_api_headers(x_api_key)
-        body_ca = {
-            "saleState": "open", "searchType": "live", "pageNumber": 1, "limit": 3,
-            "lat": 43.6532, "lng": -79.3832, "radiusMetres": 500_000, "country": "CA",
-        }
-        body_us = {**body_ca, "country": "US", "lat": 40.7128, "lng": -74.0060}
-
-        probes = [
-            # POST with JSON body (axios default Content-Type suggests POST)
-            ("POST", f"{MAXSOLD_API_BASE}/auctions",    body_ca),
-            ("POST", f"{MAXSOLD_API_BASE}/auctions",    body_us),
-            # Alternative paths
-            ("GET",  f"{MAXSOLD_API_BASE}/auction/list",          body_ca),
-            ("POST", f"{MAXSOLD_API_BASE}/auction/search",        body_ca),
-            ("POST", f"{MAXSOLD_API_BASE}/search",                body_ca),
-            # api.maxsold.com with x-api-key
-            ("GET",  "https://api.maxsold.com/auctions",          body_ca),
-            ("GET",  "https://api.maxsold.com/v1/auctions",       body_ca),
-            ("POST", "https://api.maxsold.com/auctions/search",   body_ca),
-        ]
-        for method, url, data in probes:
-            try:
-                if method == "POST":
-                    r = session.post(url, headers=hdrs, json=data, timeout=10)
-                else:
-                    r = session.get(url, headers=hdrs, params=data, timeout=10)
-                snippet = r.text[:160].replace("\n", " ")
-                print(f"  {method} {url}")
-                print(f"  → HTTP {r.status_code}  body={snippet!r}\n")
-            except Exception as exc:
-                print(f"  {method} {url} → ERROR: {exc}\n")
+        print("[-] No auctions returned. Try a different location or increase radius_km.")
         return
 
     print(f"[+] Found {len(auctions)} auction(s):\n")
     for i, auction in enumerate(auctions, 1):
-        # Try both old Algolia field names and new REST API field names
-        title      = auction.get("title") or auction.get("name") or "(no title)"
-        auction_id = (auction.get("amAuctionId") or auction.get("objectID")
-                      or auction.get("id") or "?")
+        title      = auction.get("title") or "(no title)"
+        auction_id = auction.get("id") or "?"
         city       = auction.get("city") or ""
         province   = auction.get("province") or auction.get("state") or ""
-        end_date   = auction.get("endDate") or auction.get("end_date") or auction.get("end") or "?"
+        end_date   = auction.get("ends") or auction.get("end_time_unix") or "?"
         print(f"  {i}. [{auction_id}] {title}")
         if city or province:
             print(f"      Location : {city}, {province}".strip(", "))
         print(f"      Ends     : {end_date}")
-        print(f"      Keys     : {list(auction.keys())[:10]}")
 
     # Step 4: Fetch items from the first auction
-    first_id = (auctions[0].get("amAuctionId") or auctions[0].get("objectID")
-                or auctions[0].get("id"))
+    first_id = auctions[0].get("id")
     if first_id:
         print(f"\n[*] Fetching items for auction ID {first_id}...")
         try:
