@@ -59,13 +59,23 @@ def build_api_headers(x_api_key: str) -> dict:
     }
 
 
-def test_connection(session: requests.Session, x_api_key: str) -> bool:
-    """Send a minimal query to verify credentials work."""
+def test_connection(session: requests.Session, x_api_key: str,
+                    location: str = "43.6532,-79.3832") -> bool:
+    """Send a minimal query to verify credentials work.
+
+    A location is required — the API always returns [] without lat/lng.
+    Defaults to Toronto (43.6532,-79.3832).
+    """
     url = f"{MAXSOLD_API_BASE}/auctions"
     headers = build_api_headers(x_api_key)
+    lat, lng = location.split(",", 1)
+    params = {
+        "saleState": "open", "searchType": "live", "pageNumber": 1, "limit": 1,
+        "lat": lat.strip(), "lng": lng.strip(), "radiusMetres": 160_000,
+    }
 
     print(f"[*] Testing connection to: {url}")
-    resp = session.get(url, headers=headers, params={"saleState": "open", "limit": 1}, timeout=15)
+    resp = session.get(url, headers=headers, params=params, timeout=15)
 
     if resp.status_code == 200:
         data = resp.json()
@@ -166,21 +176,25 @@ def main():
     x_api_key = creds["x_api_key"]
     print(f"[+] x_api_key={x_api_key[:6]}...{x_api_key[-4:]!r}")
 
-    # Step 2: Verify the connection
-    ok = test_connection(session, x_api_key)
+    # Step 2: Verify the connection (location required for non-empty response)
+    demo_location = "43.6532,-79.3832"   # Toronto, ON
+    ok = test_connection(session, x_api_key, location=demo_location)
     if not ok:
         print("[!] Aborting — connection test failed.")
         return
 
-    # Step 3: Run a sample auction search
-    print("\n[*] Searching for live auctions (up to 5 results)...")
-    auctions = search_auctions(session, x_api_key, hits_per_page=5)
+    # Step 3: Run a sample auction search near Toronto
+    print(f"\n[*] Searching for live auctions near {demo_location} (up to 5 results)...")
+    auctions = search_auctions(
+        session, x_api_key,
+        location=demo_location,
+        radius_km=160,
+        hits_per_page=5,
+    )
 
     if not auctions:
         print("[-] No auctions returned.")
-        print("    Raw response from /api/auctions (no params):")
-        r = session.get(f"{MAXSOLD_API_BASE}/auctions", headers=build_api_headers(x_api_key), timeout=15)
-        print(f"    HTTP {r.status_code}: {r.text[:500]}")
+        print("    Tip: try a different lat/lng or increase radius_km.")
         return
 
     print(f"[+] Found {len(auctions)} auction(s):\n")
@@ -196,6 +210,7 @@ def main():
         if city or province:
             print(f"      Location : {city}, {province}".strip(", "))
         print(f"      Ends     : {end_date}")
+        print(f"      Keys     : {list(auction.keys())[:10]}")
 
     # Step 4: Fetch items from the first auction
     first_id = (auctions[0].get("amAuctionId") or auctions[0].get("objectID")
