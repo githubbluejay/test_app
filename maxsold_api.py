@@ -31,21 +31,37 @@ def get_js_bundle_url(session: requests.Session) -> str:
     resp = session.get(MAXSOLD_HOME, headers=HEADERS, timeout=15)
     resp.raise_for_status()
 
-    # Look for the hashed main JS chunk (e.g. main.xxxxxxxxxxxxxxxx.js)
-    match = re.search(r'src="(/main\.[a-f0-9]+\.js)"', resp.text)
+    html = resp.text
+
+    # CRA-style: src="/main.abc123.js"
+    match = re.search(r'src="(/main\.[a-f0-9]+\.js)"', html)
     if not match:
-        # Fallback: try any script with a hash that looks like the main bundle
-        match = re.search(r'"(/[^"]*main[^"]*\.js)"', resp.text)
+        # Vite-style: src="/assets/index-abc123.js"
+        match = re.search(r'src="(/assets/index-[^"]+\.js)"', html)
+    if not match:
+        # Vite-style with hash in filename: /assets/SomeName-abc12345.js
+        match = re.search(r'src="(/assets/[^"]*-[a-f0-9]{8,}\.[^"]*\.js)"', html)
+    if not match:
+        # Any script tag whose path contains "main"
+        match = re.search(r'src="(/[^"]*main[^"]*\.js)"', html)
+    if not match:
+        # Last resort: any hashed JS bundle referenced in a script tag
+        match = re.search(r'src="(/[^"]+\.[a-f0-9]{8,}\.js)"', html)
     if not match:
         raise RuntimeError("Could not locate main JS bundle on MaxSold homepage.")
 
-    return MAXSOLD_HOME + match.group(1)
+    path = match.group(1)
+    return path if path.startswith("http") else MAXSOLD_HOME + path
 
 
 def extract_algolia_credentials(session: requests.Session) -> dict:
     """
     Download MaxSold's main JS bundle and parse out the Algolia
     application ID and search API key embedded in the bundle.
+
+    Multiple patterns are tried in order to handle bundle format changes.
+    Algolia app IDs are 8-12 uppercase alphanumeric chars; search API keys
+    are 32 lowercase hex chars.
     """
     print("[*] Fetching MaxSold homepage to find JS bundle...")
     js_url = get_js_bundle_url(session)
@@ -55,8 +71,46 @@ def extract_algolia_credentials(session: requests.Session) -> dict:
     resp.raise_for_status()
     js_text = resp.text
 
-    app_id_match = re.search(r'algoliaApplicationId\s*[=:]\s*["\']([^"\']+)["\']', js_text)
-    api_key_match = re.search(r'algoliaSearchAPIKey\s*[=:]\s*["\']([^"\']+)["\']', js_text)
+    # --- App ID patterns (most-specific to most-general) ---
+    APP_ID_PATTERNS = [
+        # Named variables (original)
+        r'algoliaApplicationId\s*[=:]\s*["\']([^"\']+)["\']',
+        r'algoliaAppId\s*[=:]\s*["\']([^"\']+)["\']',
+        r'ALGOLIA_APP_ID\s*[=:]\s*["\']([^"\']+)["\']',
+        r'"ALGOLIA_APP_ID"\s*:\s*"([^"]+)"',
+        # Minified object literal: appId:"ABCDE12345"
+        # Algolia app IDs are uppercase alphanumeric, typically 10 chars.
+        r'appId\s*:\s*["\']([A-Z0-9]{8,12})["\']',
+        r'"appId"\s*:\s*"([A-Z0-9]{8,12})"',
+    ]
+
+    # --- API key patterns ---
+    API_KEY_PATTERNS = [
+        # Named variables (original)
+        r'algoliaSearchAPIKey\s*[=:]\s*["\']([^"\']+)["\']',
+        r'algoliaApiKey\s*[=:]\s*["\']([^"\']+)["\']',
+        r'ALGOLIA_SEARCH_KEY\s*[=:]\s*["\']([^"\']+)["\']',
+        r'ALGOLIA_API_KEY\s*[=:]\s*["\']([^"\']+)["\']',
+        r'"ALGOLIA_API_KEY"\s*:\s*"([^"]+)"',
+        # Minified object literal: apiKey:"abc123..."
+        # Algolia search keys are exactly 32 lowercase hex chars.
+        r'apiKey\s*:\s*["\']([a-f0-9]{32})["\']',
+        r'"apiKey"\s*:\s*"([a-f0-9]{32})"',
+    ]
+
+    app_id_match = None
+    for pattern in APP_ID_PATTERNS:
+        app_id_match = re.search(pattern, js_text)
+        if app_id_match:
+            print(f"[*] App ID matched with pattern: {pattern}")
+            break
+
+    api_key_match = None
+    for pattern in API_KEY_PATTERNS:
+        api_key_match = re.search(pattern, js_text)
+        if api_key_match:
+            print(f"[*] API key matched with pattern: {pattern}")
+            break
 
     if not app_id_match or not api_key_match:
         raise RuntimeError(
