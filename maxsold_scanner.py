@@ -20,7 +20,7 @@ import streamlit as st
 
 from ebay_api import liquidity_from_comps, search_sold_prices
 from maxsold_api import (
-    extract_algolia_credentials,
+    get_credentials,
     get_auction_items,
     search_auctions,
 )
@@ -260,8 +260,7 @@ def _ref_suffix(referral_code: str) -> str:
 
 def fetch_items_from_auctions(
     session: requests.Session,
-    app_id: str,
-    api_key: str,
+    x_api_key: str,
     n_auctions: int,
     location: str,
     radius_km: int = 50,
@@ -269,7 +268,7 @@ def fetch_items_from_auctions(
 ) -> list[dict]:
     """Fetch all items across the nearest n_auctions within radius_km of location."""
     auctions = search_auctions(
-        session, app_id, api_key,
+        session, x_api_key,
         location=location,
         radius_km=radius_km,
         hits_per_page=n_auctions,
@@ -278,11 +277,11 @@ def fetch_items_from_auctions(
     ref = _ref_suffix(referral_code)
     all_items: list[dict] = []
     for auction in auctions:
-        auction_id    = _field(auction, "objectID", "id")
+        auction_id    = _field(auction, "amAuctionId", "objectID", "id")
         auction_title = _field(auction, "title", "name", default="Unknown Auction")
         auction_city  = _field(auction, "city", default="")
         auction_prov  = _field(auction, "province", "state", default="")
-        auction_end   = _field(auction, "end_date", "endDate", "end", default="")
+        auction_end   = _field(auction, "endDate", "end_date", "end", default="")
         auction_url   = f"https://www.maxsold.com/auctions/{auction_id}"
 
         try:
@@ -569,15 +568,15 @@ if scan_clicked:
     status   = st.empty()
 
     try:
-        # 1. Extract Algolia credentials from MaxSold's JS bundle
+        # 1. Read API credentials from MaxSold's /__ENV.js
         session = requests.Session()
-        creds   = extract_algolia_credentials(session)
+        creds   = get_credentials(session)
         progress.progress(10, text="Connected. Fetching auctions...")
 
         # 2. Fetch items across nearby auctions
         status.info(f"Scanning {max_auctions} auction(s) within {radius_km} km of {location_str}...")
         all_items = fetch_items_from_auctions(
-            session, creds["app_id"], creds["api_key"],
+            session, creds["x_api_key"],
             max_auctions, location_str, radius_km,
             referral_code=referral_code,
         )
