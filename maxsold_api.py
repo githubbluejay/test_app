@@ -138,7 +138,11 @@ def search_auctions(
     url = f"{MAXSOLD_API_BASE}/auctions"
     headers = build_api_headers(x_api_key)
 
-    resp = session.get(url, headers=headers, params=params, timeout=15)
+    # Try POST with JSON body first (axios instances use Content-Type: application/json
+    # by default, implying JSON POST bodies rather than GET query params).
+    resp = session.post(url, headers=headers, json=params, timeout=15)
+    if resp.status_code == 405:   # Method Not Allowed — fall back to GET
+        resp = session.get(url, headers=headers, params=params, timeout=15)
     resp.raise_for_status()
 
     data = resp.json()
@@ -204,24 +208,38 @@ def main():
     )
 
     if not auctions:
-        print("[-] No auctions returned. Probing param variants for debugging...\n")
+        print("[-] No auctions returned. Probing method/path variants...\n")
         hdrs = build_api_headers(x_api_key)
-        url  = f"{MAXSOLD_API_BASE}/auctions"
+        body_ca = {
+            "saleState": "open", "searchType": "live", "pageNumber": 1, "limit": 3,
+            "lat": 43.6532, "lng": -79.3832, "radiusMetres": 500_000, "country": "CA",
+        }
+        body_us = {**body_ca, "country": "US", "lat": 40.7128, "lng": -74.0060}
+
         probes = [
-            {"saleState": "open", "country": "CA"},
-            {"saleState": "open", "country": "US"},
-            {"saleState": "open", "lat": "43.6532", "lng": "-79.3832",
-             "radiusMetres": 500_000, "country": "CA"},
-            {"saleState": "open", "lat": "43.6532", "lng": "-79.3832",
-             "radiusMetres": 500_000, "country": "US"},
-            {"lat": "43.6532", "lng": "-79.3832", "radiusMetres": 500_000},
-            {},
+            # POST with JSON body (axios default Content-Type suggests POST)
+            ("POST", f"{MAXSOLD_API_BASE}/auctions",    body_ca),
+            ("POST", f"{MAXSOLD_API_BASE}/auctions",    body_us),
+            # Alternative paths
+            ("GET",  f"{MAXSOLD_API_BASE}/auction/list",          body_ca),
+            ("POST", f"{MAXSOLD_API_BASE}/auction/search",        body_ca),
+            ("POST", f"{MAXSOLD_API_BASE}/search",                body_ca),
+            # api.maxsold.com with x-api-key
+            ("GET",  "https://api.maxsold.com/auctions",          body_ca),
+            ("GET",  "https://api.maxsold.com/v1/auctions",       body_ca),
+            ("POST", "https://api.maxsold.com/auctions/search",   body_ca),
         ]
-        for p in probes:
-            r = session.get(url, headers=hdrs, params=p, timeout=15)
-            body = r.text[:120].replace("\n", " ")
-            print(f"  params={p}")
-            print(f"  → HTTP {r.status_code}  body={body!r}\n")
+        for method, url, data in probes:
+            try:
+                if method == "POST":
+                    r = session.post(url, headers=hdrs, json=data, timeout=10)
+                else:
+                    r = session.get(url, headers=hdrs, params=data, timeout=10)
+                snippet = r.text[:160].replace("\n", " ")
+                print(f"  {method} {url}")
+                print(f"  → HTTP {r.status_code}  body={snippet!r}\n")
+            except Exception as exc:
+                print(f"  {method} {url} → ERROR: {exc}\n")
         return
 
     print(f"[+] Found {len(auctions)} auction(s):\n")
