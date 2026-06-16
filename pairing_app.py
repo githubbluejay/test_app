@@ -363,21 +363,18 @@ def _generate_round_mc(round_num, n_outer=600):
 # ── Validation ────────────────────────────────────────────────────────────────
 
 def _validate():
-    players = st.session_state.players
     ta, tb = _team("A"), _team("B")
     issues = []
-    if len(ta) != 12:
-        issues.append(f"{st.session_state.name_a} has {len(ta)} players (need 12).")
-    if len(tb) != 12:
-        issues.append(f"{st.session_state.name_b} has {len(tb)} players (need 12).")
-    for team, name in [("A", st.session_state.name_a), ("B", st.session_state.name_b)]:
-        by_rank = defaultdict(int)
-        for p in players:
-            if p["team"] == team:
-                by_rank[p["rank"]] += 1
-        for r in [1, 2, 3, 4]:
-            if by_rank[r] != 3:
-                issues.append(f"{name}: rank {r} has {by_rank[r]} players (expect 3).")
+    if len(ta) == 0 or len(tb) == 0:
+        issues.append("Both teams need at least 2 players.")
+        return issues
+    if len(ta) != len(tb):
+        issues.append(
+            f"Teams must be the same size ({st.session_state.name_a}: {len(ta)}, "
+            f"{st.session_state.name_b}: {len(tb)})."
+        )
+    if len(ta) % 2 != 0:
+        issues.append(f"Each team needs an even number of players (currently {len(ta)}).")
     return issues
 
 # ── Group card renderer ────────────────────────────────────────────────────────
@@ -425,16 +422,22 @@ st.markdown(
     "<div class='app-sub'>Mon AM &nbsp;·&nbsp; Mon PM &nbsp;·&nbsp; Tue AM &nbsp;·&nbsp; Tue PM</div>",
     unsafe_allow_html=True,
 )
+st.markdown(
+    "**How it works:** Add players to each team with skill ranks (1 = best, 4 = weakest) on the "
+    "**Players** tab. Optionally lock in specific match-ups on **Fixed Matches**. "
+    "Hit **Generate** on the **Pairings** tab — the optimizer balances skill levels and maximises "
+    "variety across all 4 sessions. Download results from **Stats & Export**."
+)
 
 ta_count = len(_team("A"))
 tb_count = len(_team("B"))
 fp_count = len(st.session_state.fixed_pairings)
 r_count  = len(st.session_state.pairings)
 st.caption(
-    f"{st.session_state.name_a}: {ta_count}/12 players  ·  "
-    f"{st.session_state.name_b}: {tb_count}/12 players  ·  "
+    f"{st.session_state.name_a}: {ta_count} players  ·  "
+    f"{st.session_state.name_b}: {tb_count} players  ·  "
     f"{fp_count} fixed match{'es' if fp_count!=1 else ''}  ·  "
-    f"{r_count}/4 rounds generated"
+    f"{r_count}/4 sessions generated"
 )
 st.divider()
 
@@ -551,7 +554,8 @@ with tab_players:
     # Validation banner
     issues = _validate()
     if not issues:
-        st.success("Roster ready — 12 per team, 3 per rank. Head to Pairings to generate the schedule.")
+        g = len(_team("A")) // 2
+        st.success(f"Roster ready — {g} groups of 4 per session. Head to Pairings to generate the schedule.")
     else:
         for issue in issues:
             st.warning(issue)
