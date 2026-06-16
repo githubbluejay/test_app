@@ -25,16 +25,6 @@ st.markdown("""
   .app-sub {
     font-size:14px; color:#888; margin-top:-8px; margin-bottom:16px;
   }
-  /* ── Step chips ── */
-  .steps {
-    display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap;
-  }
-  .step {
-    background:#f0f0f0; border-radius:20px; padding:4px 14px;
-    font-size:13px; color:#555;
-  }
-  .step-done { background:#d4edda; color:#155724; }
-  .step-active { background:#006747; color:#fff; font-weight:600; }
   /* ── Group cards ── */
   .group-card {
     background:#fff; border:1px solid #ddd; border-radius:8px;
@@ -425,26 +415,6 @@ def _render_group(group, gi, tee, rmap, name_a, name_b, fixed=False):
     </div>
     """
 
-# ── Step indicator ────────────────────────────────────────────────────────────
-
-def _step_html(active_tab):
-    steps = [
-        ("1 · Players",       bool(st.session_state.players)),
-        ("2 · Fixed Matches", True),
-        ("3 · Pairings",      bool(st.session_state.pairings)),
-        ("4 · Stats & Export",bool(st.session_state.pairings)),
-    ]
-    tabs = ["Players", "Fixed Matches", "Pairings", "Stats & Export"]
-    chips = []
-    for (label, done), tab in zip(steps, tabs):
-        if tab == active_tab:
-            cls = "step step-active"
-        elif done:
-            cls = "step step-done"
-        else:
-            cls = "step"
-        chips.append(f"<span class='{cls}'>{label}</span>")
-    return "<div class='steps'>" + "".join(chips) + "</div>"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # APP HEADER
@@ -481,8 +451,6 @@ tab_players, tab_fixed, tab_pairings, tab_stats = st.tabs(
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_players:
-    st.markdown(_step_html("Players"), unsafe_allow_html=True)
-
     # Team / tee settings
     c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
     sk = st.session_state.settings_key
@@ -670,7 +638,6 @@ with tab_players:
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_fixed:
-    st.markdown(_step_html("Fixed Matches"), unsafe_allow_html=True)
     st.markdown(
         "Specify match-ups that **must** happen in a particular session. "
         "The optimizer will lock these in and arrange the remaining groups around them."
@@ -756,8 +723,6 @@ with tab_fixed:
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_pairings:
-    st.markdown(_step_html("Pairings"), unsafe_allow_html=True)
-
     issues = _validate()
     if issues:
         st.warning("Fix roster issues on the Players tab first.")
@@ -849,8 +814,6 @@ with tab_pairings:
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_stats:
-    st.markdown(_step_html("Stats & Export"), unsafe_allow_html=True)
-
     if not st.session_state.pairings:
         st.info("Generate pairings first.")
     else:
