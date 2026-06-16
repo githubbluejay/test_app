@@ -176,18 +176,69 @@ def _rank_sum_pair(pair, rmap):
 
 # ── Core Pairing Algorithm ────────────────────────────────────────────────────
 
-def generate_round(round_num, n_outer=400, n_inner=200):
+def _build_b_pairs_for_sums(b_names, target_sums, rmap, hist, n_tries=40):
+    """
+    Build pairs from b_names whose rank sums exactly match target_sums.
+    Tries n_tries random orderings and returns the pairing with lowest
+    history penalty, or None if no valid pairing is found.
+    """
+    target = sorted(target_sums)
+    best_pairs = None
+    best_h = math.inf
+
+    for _ in range(n_tries):
+        remaining = list(b_names)
+        random.shuffle(remaining)
+        pairs = []
+        success = True
+
+        for t in target:
+            # Find all pairs in remaining that hit this rank sum
+            candidates = [
+                (i, j)
+                for i in range(len(remaining))
+                for j in range(i + 1, len(remaining))
+                if rmap[remaining[i]] + rmap[remaining[j]] == t
+            ]
+            if not candidates:
+                success = False
+                break
+
+            # Pick candidate with lowest history count
+            best_c, best_ch = None, math.inf
+            for i, j in candidates:
+                h = hist.get(frozenset({remaining[i], remaining[j]}), 0)
+                if h < best_ch:
+                    best_ch = h
+                    best_c = (i, j)
+
+            pairs.append((remaining[best_c[0]], remaining[best_c[1]]))
+            for idx in sorted(best_c, reverse=True):
+                remaining.pop(idx)
+
+        if success:
+            h_total = sum(hist.get(frozenset({p[0], p[1]}), 0) for p in pairs)
+            if h_total < best_h:
+                best_h = h_total
+                best_pairs = pairs
+
+    return best_pairs
+
+
+def generate_round(round_num, n_outer=600):
     """
     Build 6 groups of 4 (2 Team-A + 2 Team-B) per round.
 
-    Strategy:
-    - Sort each team by rank, then pair player[i] with player[n-1-i] to create
-      complementary pairs (rank 1+4=5, 2+3=5, etc.).  All pairs have the same
-      rank sum, so any A-pair vs B-pair match is skill-balanced.
-    - Vary 'who pairs with whom' by shuffling players within each rank tier.
-    - Vary which A-pair faces which B-pair (inner random permutation).
-    - Keep the arrangement that minimises cumulative same-group repeat count
-      over all previous rounds.
+    Flexible strategy — any rank combination is allowed as long as the
+    Team-A pair's rank sum equals the Team-B pair's rank sum within each group:
+      e.g.  (R1+R1) vs (R1+R1),  (R2+R2) vs (R2+R2),  (R1+R4) vs (R2+R3), etc.
+
+    Algorithm:
+    1. Randomly pair Team-A players (any order — no complementary constraint).
+    2. Record the resulting rank-sum multiset.
+    3. Build a Team-B pairing that matches those rank sums exactly.
+    4. Within each rank-sum bucket, randomly assign A-pairs to B-pairs.
+    5. Score by cumulative same-group repeats from earlier rounds; keep best.
     """
     hist = _all_pair_history(exclude_round=round_num)
     rmap = _rmap()
@@ -197,57 +248,42 @@ def generate_round(round_num, n_outer=400, n_inner=200):
     if not ta or not tb:
         return None, None
 
-    a_by_rank = defaultdict(list)
-    b_by_rank = defaultdict(list)
-    for p in ta:
-        a_by_rank[p["rank"]].append(p["name"])
-    for p in tb:
-        b_by_rank[p["rank"]].append(p["name"])
+    a_names = [p["name"] for p in ta]
+    b_names = [p["name"] for p in tb]
 
     best_groups = None
     best_score = math.inf
 
     for _ in range(n_outer):
-        # Shuffle within each rank tier, then flatten sorted by rank
-        a_flat = []
-        for r in sorted(a_by_rank):
-            a_flat.extend(random.sample(a_by_rank[r], len(a_by_rank[r])))
+        # Random A pairing — any rank combination allowed
+        a_perm = random.sample(a_names, len(a_names))
+        a_pairs = [(a_perm[2 * i], a_perm[2 * i + 1]) for i in range(len(a_perm) // 2)]
 
-        b_flat = []
-        for r in sorted(b_by_rank):
-            b_flat.extend(random.sample(b_by_rank[r], len(b_by_rank[r])))
+        # Rank sums for each A pair
+        a_sums = [rmap[p[0]] + rmap[p[1]] for p in a_pairs]
 
-        na, nb = len(a_flat), len(b_flat)
+        # Build B pairs with the same rank-sum multiset
+        b_pairs = _build_b_pairs_for_sums(b_names, a_sums, rmap, hist)
+        if b_pairs is None:
+            continue
 
-        # Complementary pairing: pair index i with n-1-i
-        a_pairs = [(a_flat[i], a_flat[na - 1 - i]) for i in range(na // 2)]
-        b_pairs = [(b_flat[i], b_flat[nb - 1 - i]) for i in range(nb // 2)]
+        # Group pairs by rank sum, then randomly assign A↔B within each bucket
+        a_by_sum = defaultdict(list)
+        b_by_sum = defaultdict(list)
+        for ap in a_pairs:
+            a_by_sum[rmap[ap[0]] + rmap[ap[1]]].append(ap)
+        for bp in b_pairs:
+            b_by_sum[rmap[bp[0]] + rmap[bp[1]]].append(bp)
 
-        # Sort pairs by rank sum (ascending) so same-sum pairs align
-        a_pairs.sort(key=lambda p: _rank_sum_pair(p, rmap))
-        b_pairs.sort(key=lambda p: _rank_sum_pair(p, rmap))
+        groups = []
+        for s in sorted(a_by_sum):
+            b_bucket = random.sample(b_by_sum[s], len(b_by_sum[s]))
+            for ap, bp in zip(a_by_sum[s], b_bucket):
+                groups.append(list(ap) + list(bp))
 
-        n_groups = min(len(a_pairs), len(b_pairs))
-        a_pairs = a_pairs[:n_groups]
-        b_pairs_base = b_pairs[:n_groups]
-
-        # Inner loop: try random permutations of b-pair assignment
-        b_idx = list(range(n_groups))
-        local_best_score = math.inf
-        local_best_perm = b_idx[:]
-
-        for _ in range(n_inner):
-            random.shuffle(b_idx)
-            groups = [list(a_pairs[i]) + list(b_pairs_base[b_idx[i]]) for i in range(n_groups)]
-            s = _score_groups(groups, hist)
-            if s < local_best_score:
-                local_best_score = s
-                local_best_perm = b_idx[:]
-
-        groups = [list(a_pairs[i]) + list(b_pairs_base[local_best_perm[i]]) for i in range(n_groups)]
-
-        if local_best_score < best_score:
-            best_score = local_best_score
+        score = _score_groups(groups, hist)
+        if score < best_score:
+            best_score = score
             best_groups = groups
 
         if best_score == 0:
