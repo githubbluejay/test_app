@@ -3,6 +3,11 @@ import pandas as pd
 import random
 from itertools import combinations
 from collections import defaultdict
+try:
+    import pulp
+    _PULP_AVAILABLE = True
+except ImportError:
+    _PULP_AVAILABLE = False
 import math
 import numpy as np
 import plotly.graph_objects as go
@@ -174,72 +179,114 @@ def _score_groups(groups, hist):
 def _rank_sum_pair(pair, rmap):
     return rmap[pair[0]] + rmap[pair[1]]
 
-# ── Core Pairing Algorithm ────────────────────────────────────────────────────
+# ── Core Pairing Algorithm (ILP via PuLP, MC fallback) ───────────────────────
 
-def _build_b_pairs_for_sums(b_names, target_sums, rmap, hist, n_tries=40):
+def generate_round(round_num, time_limit=30):
     """
-    Build pairs from b_names whose rank sums exactly match target_sums.
-    Tries n_tries random orderings and returns the pairing with lowest
-    history penalty, or None if no valid pairing is found.
+    Build 6 balanced groups of 4 (2 Team-A + 2 Team-B) per round.
+
+    Uses Integer Linear Programming (PuLP/CBC) to find the provably optimal
+    grouping that minimises repeat same-group appearances from earlier rounds,
+    subject to:
+      • Every player in exactly one group.
+      • Exactly 2 Team-A and 2 Team-B players per group.
+      • Team-A rank sum == Team-B rank sum within each group (skill balance).
+
+    Falls back to Monte Carlo heuristic if PuLP is unavailable or the solver
+    returns no feasible solution within time_limit seconds.
     """
-    target = sorted(target_sums)
-    best_pairs = None
-    best_h = math.inf
+    if _PULP_AVAILABLE:
+        result = _generate_round_ilp(round_num, time_limit)
+        if result[0] is not None:
+            return result
 
-    for _ in range(n_tries):
-        remaining = list(b_names)
-        random.shuffle(remaining)
-        pairs = []
-        success = True
-
-        for t in target:
-            # Find all pairs in remaining that hit this rank sum
-            candidates = [
-                (i, j)
-                for i in range(len(remaining))
-                for j in range(i + 1, len(remaining))
-                if rmap[remaining[i]] + rmap[remaining[j]] == t
-            ]
-            if not candidates:
-                success = False
-                break
-
-            # Pick candidate with lowest history count
-            best_c, best_ch = None, math.inf
-            for i, j in candidates:
-                h = hist.get(frozenset({remaining[i], remaining[j]}), 0)
-                if h < best_ch:
-                    best_ch = h
-                    best_c = (i, j)
-
-            pairs.append((remaining[best_c[0]], remaining[best_c[1]]))
-            for idx in sorted(best_c, reverse=True):
-                remaining.pop(idx)
-
-        if success:
-            h_total = sum(hist.get(frozenset({p[0], p[1]}), 0) for p in pairs)
-            if h_total < best_h:
-                best_h = h_total
-                best_pairs = pairs
-
-    return best_pairs
+    return _generate_round_mc(round_num)
 
 
-def generate_round(round_num, n_outer=600):
-    """
-    Build 6 groups of 4 (2 Team-A + 2 Team-B) per round.
+def _generate_round_ilp(round_num, time_limit=30):
+    hist = _all_pair_history(exclude_round=round_num)
+    rmap = _rmap()
 
-    Flexible strategy — any rank combination is allowed as long as the
-    Team-A pair's rank sum equals the Team-B pair's rank sum within each group:
-      e.g.  (R1+R1) vs (R1+R1),  (R2+R2) vs (R2+R2),  (R1+R4) vs (R2+R3), etc.
+    ta = _team("A")
+    tb = _team("B")
+    if not ta or not tb:
+        return None, None
 
-    Algorithm:
-    1. Randomly pair Team-A players (any order — no complementary constraint).
-    2. Record the resulting rank-sum multiset.
-    3. Build a Team-B pairing that matches those rank sums exactly.
-    4. Within each rank-sum bucket, randomly assign A-pairs to B-pairs.
-    5. Score by cumulative same-group repeats from earlier rounds; keep best.
-    """
+    a_names = [p["name"] for p in ta]
+    b_names = [p["name"] for p in tb]
+    all_names = a_names + b_names
+    N = len(all_names)          # 24
+    G = len(a_names) // 2       # 6 groups
+
+    name_idx = {n: i for i, n in enumerate(all_names)}
+    a_set = set(range(len(a_names)))
+    b_set = set(range(len(a_names), N))
+    ranks = [rmap[n] for n in all_names]
+
+    prob = pulp.LpProblem(f"Golf_R{round_num}", pulp.LpMinimize)
+
+    # x[p][g] = 1 if player p is assigned to group g
+    x = [[pulp.LpVariable(f"x{p}g{g}", cat="Binary") for g in range(G)]
+         for p in range(N)]
+
+    # Identify historical pairs (player-index pairs with repeat count)
+    hist_pairs = []
+    for key, cnt in hist.items():
+        ns = list(key)
+        if len(ns) == 2 and ns[0] in name_idx and ns[1] in name_idx:
+            i, j = name_idx[ns[0]], name_idx[ns[1]]
+            if i > j:
+                i, j = j, i
+            hist_pairs.append((i, j, cnt))
+
+    # r[i,j] = 1 if players i and j share a group this round (only for historical pairs)
+    r = {(i, j): pulp.LpVariable(f"r{i}_{j}", cat="Binary") for i, j, _ in hist_pairs}
+
+    # Objective: minimise weighted repeat pairings
+    prob += pulp.lpSum(cnt * r[(i, j)] for i, j, cnt in hist_pairs) if hist_pairs else 0
+
+    # Each player in exactly one group
+    for p in range(N):
+        prob += pulp.lpSum(x[p][g] for g in range(G)) == 1
+
+    # Each group: exactly 2 Team-A and 2 Team-B
+    for g in range(G):
+        prob += pulp.lpSum(x[p][g] for p in a_set) == 2
+        prob += pulp.lpSum(x[p][g] for p in b_set) == 2
+
+    # Skill balance: rank sum of A players == rank sum of B players per group
+    for g in range(G):
+        prob += (pulp.lpSum(ranks[p] * x[p][g] for p in a_set) ==
+                 pulp.lpSum(ranks[p] * x[p][g] for p in b_set))
+
+    # Link r[i,j] to group co-membership: r[i,j] >= x[i][g] + x[j][g] - 1
+    for i, j, _ in hist_pairs:
+        for g in range(G):
+            prob += r[(i, j)] >= x[i][g] + x[j][g] - 1
+
+    prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=time_limit))
+
+    if pulp.LpStatus[prob.status] not in ("Optimal", "Feasible"):
+        return None, None
+
+    # Extract groups: A players first, then B players
+    groups = defaultdict(lambda: ([], []))
+    for p in range(N):
+        name = all_names[p]
+        for g in range(G):
+            if (pulp.value(x[p][g]) or 0) > 0.5:
+                if p in a_set:
+                    groups[g][0].append(name)
+                else:
+                    groups[g][1].append(name)
+
+    final_groups = [groups[g][0] + groups[g][1] for g in range(G)]
+    score = int(round(pulp.value(prob.objective) or 0))
+    return final_groups, score
+
+
+def _generate_round_mc(round_num, n_outer=600):
+    """Monte Carlo fallback — used when PuLP is unavailable."""
     hist = _all_pair_history(exclude_round=round_num)
     rmap = _rmap()
 
@@ -251,44 +298,56 @@ def generate_round(round_num, n_outer=600):
     a_names = [p["name"] for p in ta]
     b_names = [p["name"] for p in tb]
 
-    best_groups = None
-    best_score = math.inf
+    def build_b(target_sums, n_tries=40):
+        target = sorted(target_sums)
+        best, best_h = None, math.inf
+        for _ in range(n_tries):
+            rem = list(b_names)
+            random.shuffle(rem)
+            pairs, ok = [], True
+            for t in target:
+                cands = [(i, j) for i in range(len(rem))
+                         for j in range(i + 1, len(rem))
+                         if rmap[rem[i]] + rmap[rem[j]] == t]
+                if not cands:
+                    ok = False; break
+                bc, bh = None, math.inf
+                for i, j in cands:
+                    h = hist.get(frozenset({rem[i], rem[j]}), 0)
+                    if h < bh:
+                        bh, bc = h, (i, j)
+                pairs.append((rem[bc[0]], rem[bc[1]]))
+                for idx in sorted(bc, reverse=True):
+                    rem.pop(idx)
+            if ok:
+                h_total = sum(hist.get(frozenset({p[0], p[1]}), 0) for p in pairs)
+                if h_total < best_h:
+                    best_h, best = h_total, pairs
+        return best
 
+    best_groups, best_score = None, math.inf
     for _ in range(n_outer):
-        # Random A pairing — any rank combination allowed
         a_perm = random.sample(a_names, len(a_names))
-        a_pairs = [(a_perm[2 * i], a_perm[2 * i + 1]) for i in range(len(a_perm) // 2)]
-
-        # Rank sums for each A pair
+        a_pairs = [(a_perm[2*i], a_perm[2*i+1]) for i in range(len(a_perm)//2)]
         a_sums = [rmap[p[0]] + rmap[p[1]] for p in a_pairs]
-
-        # Build B pairs with the same rank-sum multiset
-        b_pairs = _build_b_pairs_for_sums(b_names, a_sums, rmap, hist)
+        b_pairs = build_b(a_sums)
         if b_pairs is None:
             continue
-
-        # Group pairs by rank sum, then randomly assign A↔B within each bucket
-        a_by_sum = defaultdict(list)
-        b_by_sum = defaultdict(list)
+        a_by_s, b_by_s = defaultdict(list), defaultdict(list)
         for ap in a_pairs:
-            a_by_sum[rmap[ap[0]] + rmap[ap[1]]].append(ap)
+            a_by_s[rmap[ap[0]] + rmap[ap[1]]].append(ap)
         for bp in b_pairs:
-            b_by_sum[rmap[bp[0]] + rmap[bp[1]]].append(bp)
-
+            b_by_s[rmap[bp[0]] + rmap[bp[1]]].append(bp)
         groups = []
-        for s in sorted(a_by_sum):
-            b_bucket = random.sample(b_by_sum[s], len(b_by_sum[s]))
-            for ap, bp in zip(a_by_sum[s], b_bucket):
+        for s in sorted(a_by_s):
+            b_bucket = random.sample(b_by_s[s], len(b_by_s[s]))
+            for ap, bp in zip(a_by_s[s], b_bucket):
                 groups.append(list(ap) + list(bp))
-
         score = _score_groups(groups, hist)
         if score < best_score:
-            best_score = score
-            best_groups = groups
-
+            best_score, best_groups = score, groups
         if best_score == 0:
             break
-
     return best_groups, best_score
 
 # ── Validation ────────────────────────────────────────────────────────────────
