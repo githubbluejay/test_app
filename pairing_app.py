@@ -126,6 +126,7 @@ def _init():
         "tee_start": "08:00",
         "tee_interval": 12,
         "json_up_key": 0,        # incremented after each load to reset the file uploader
+        "settings_key": 0,       # incremented after roster load to reset settings inputs
     }
     for k, v in defs.items():
         if k not in st.session_state:
@@ -484,21 +485,27 @@ with tab_players:
 
     # Team / tee settings
     c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
+    sk = st.session_state.settings_key
     with c1:
-        st.text_input("Team A name", key="name_a")
+        st.session_state.name_a = st.text_input(
+            "Team A name", st.session_state.name_a, key=f"name_a_{sk}")
     with c2:
-        st.text_input("Team B name", key="name_b")
+        st.session_state.name_b = st.text_input(
+            "Team B name", st.session_state.name_b, key=f"name_b_{sk}")
     with c3:
-        st.text_input("First tee (HH:MM)", key="tee_start")
+        st.session_state.tee_start = st.text_input(
+            "First tee (HH:MM)", st.session_state.tee_start, key=f"tee_start_{sk}")
     with c4:
-        st.number_input("Mins between groups", min_value=5, max_value=30, key="tee_interval")
+        st.session_state.tee_interval = st.number_input(
+            "Mins between groups", 5, 30, st.session_state.tee_interval, key=f"tee_interval_{sk}")
 
     if st.button("Load sample roster  (Ultra Vagines vs Gutter Sluts)", width="stretch"):
-        st.session_state.players       = [dict(p) for p in SAMPLE_ROSTER["players"]]
-        st.session_state.name_a        = SAMPLE_ROSTER["name_a"]
-        st.session_state.name_b        = SAMPLE_ROSTER["name_b"]
-        st.session_state.pairings      = {}
+        st.session_state.players        = [dict(p) for p in SAMPLE_ROSTER["players"]]
+        st.session_state.name_a         = SAMPLE_ROSTER["name_a"]
+        st.session_state.name_b         = SAMPLE_ROSTER["name_b"]
+        st.session_state.pairings       = {}
         st.session_state.fixed_pairings = []
+        st.session_state.settings_key  += 1
         st.rerun()
 
     st.divider()
@@ -537,6 +544,7 @@ with tab_players:
                 st.session_state.fixed_pairings = loaded.get("fixed_pairings", [])
                 st.session_state.pairings       = {}
                 st.session_state.json_up_key   += 1  # new key → uploader resets on next rerun
+                st.session_state.settings_key  += 1  # new key → text inputs reset with new defaults
                 st.rerun()
             except Exception as e:
                 st.error(f"Could not load roster: {e}")
