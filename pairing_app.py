@@ -519,53 +519,32 @@ with tab_players:
 
     st.divider()
 
-    col_form, col_import = st.columns(2)
-
-    with col_form:
-        st.markdown("#### Add player")
-        with st.form("add_player", clear_on_submit=True):
+    st.markdown("#### Add player")
+    with st.form("add_player", clear_on_submit=True):
+        fc1, fc2, fc3 = st.columns([3, 2, 2])
+        with fc1:
             pname = st.text_input("Name")
+        with fc2:
             pteam = st.radio(
                 "Team", ["A", "B"],
                 format_func=lambda x: st.session_state.name_a if x == "A" else st.session_state.name_b,
                 horizontal=True,
             )
+        with fc3:
             prank = st.select_slider(
                 "Skill rank", [1, 2, 3, 4],
                 help="1 = strongest  ·  4 = weakest"
             )
-            if st.form_submit_button("Add player"):
-                pname = pname.strip()
-                existing = [p["name"] for p in st.session_state.players]
-                if not pname:
-                    st.error("Name required.")
-                elif pname in existing:
-                    st.warning(f"'{pname}' already in roster.")
-                else:
-                    st.session_state.players.append({"name": pname, "team": pteam, "rank": prank})
-                    st.rerun()
-
-    with col_import:
-        st.markdown("#### Import CSV")
-        st.caption("Required columns: `name`, `team` (A or B), `rank` (1–4)")
-        uploaded = st.file_uploader("Upload CSV", type="csv", key="csv_up")
-        if uploaded:
-            try:
-                df_in = pd.read_csv(uploaded)
-                df_in.columns = df_in.columns.str.lower().str.strip()
-                added, existing = 0, {p["name"] for p in st.session_state.players}
-                for _, row in df_in.iterrows():
-                    n = str(row.get("name", "")).strip()
-                    t = str(row.get("team", "A")).strip().upper()
-                    r = int(row.get("rank", 2))
-                    if n and n not in existing and t in ("A", "B") and 1 <= r <= 4:
-                        st.session_state.players.append({"name": n, "team": t, "rank": r})
-                        existing.add(n)
-                        added += 1
-                st.success(f"Imported {added} player(s).")
+        if st.form_submit_button("Add player"):
+            pname = pname.strip()
+            existing = [p["name"] for p in st.session_state.players]
+            if not pname:
+                st.error("Name required.")
+            elif pname in existing:
+                st.warning(f"'{pname}' already in roster.")
+            else:
+                st.session_state.players.append({"name": pname, "team": pteam, "rank": prank})
                 st.rerun()
-            except Exception as e:
-                st.error(f"Import failed: {e}")
 
     st.divider()
 
