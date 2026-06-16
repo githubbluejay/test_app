@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import random
+import json
 from itertools import combinations
 from collections import defaultdict
 try:
@@ -499,6 +500,42 @@ with tab_players:
         st.session_state.pairings      = {}
         st.session_state.fixed_pairings = []
         st.rerun()
+
+    st.divider()
+
+    # ── Save / Load roster ────────────────────────────────────────────────────
+    st.markdown("#### Save / Load roster")
+    st.caption("Download your roster (including fixed matches) as a JSON file to reload it after a reboot.")
+    col_dl, col_ul = st.columns(2)
+    with col_dl:
+        if st.session_state.players:
+            roster_json = json.dumps({
+                "name_a": st.session_state.name_a,
+                "name_b": st.session_state.name_b,
+                "players": st.session_state.players,
+                "fixed_pairings": st.session_state.fixed_pairings,
+            }, indent=2).encode()
+            st.download_button(
+                "⬇  Save roster as JSON",
+                data=roster_json,
+                file_name="malone_roster.json",
+                mime="application/json",
+            )
+        else:
+            st.caption("No roster to save yet.")
+    with col_ul:
+        roster_file = st.file_uploader("⬆  Load roster from JSON", type="json", key="json_up")
+        if roster_file:
+            try:
+                loaded = json.loads(roster_file.read())
+                st.session_state.name_a         = loaded.get("name_a", st.session_state.name_a)
+                st.session_state.name_b         = loaded.get("name_b", st.session_state.name_b)
+                st.session_state.players        = loaded.get("players", [])
+                st.session_state.fixed_pairings = loaded.get("fixed_pairings", [])
+                st.session_state.pairings       = {}
+                st.rerun()
+            except Exception as e:
+                st.error(f"Could not load roster: {e}")
 
     st.divider()
 
