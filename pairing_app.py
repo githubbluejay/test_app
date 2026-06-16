@@ -62,6 +62,45 @@ st.markdown("""
 
 # ── State ─────────────────────────────────────────────────────────────────────
 
+SAMPLE_ROSTER = {
+    "name_a": "Ultra Vagines",
+    "name_b": "Gutter Sluts",
+    "players": [
+        # Ultra Vagines – rank 1 (scratch / elite)
+        {"name": "Dave Miller",    "team": "A", "rank": 1},
+        {"name": "Sarah Chen",     "team": "A", "rank": 1},
+        {"name": "Mike Torres",    "team": "A", "rank": 1},
+        # Ultra Vagines – rank 2
+        {"name": "Kate Walsh",     "team": "A", "rank": 2},
+        {"name": "Tom Bradshaw",   "team": "A", "rank": 2},
+        {"name": "Lisa Park",      "team": "A", "rank": 2},
+        # Ultra Vagines – rank 3
+        {"name": "Jake Foster",    "team": "A", "rank": 3},
+        {"name": "Emma Scott",     "team": "A", "rank": 3},
+        {"name": "Ryan Hughes",    "team": "A", "rank": 3},
+        # Ultra Vagines – rank 4 (high handicap)
+        {"name": "Nancy Kim",      "team": "A", "rank": 4},
+        {"name": "Chris Bell",     "team": "A", "rank": 4},
+        {"name": "Amy Grant",      "team": "A", "rank": 4},
+        # Gutter Sluts – rank 1
+        {"name": "Jack Davis",     "team": "B", "rank": 1},
+        {"name": "Maria Lopez",    "team": "B", "rank": 1},
+        {"name": "Pete Wilson",    "team": "B", "rank": 1},
+        # Gutter Sluts – rank 2
+        {"name": "Carol White",    "team": "B", "rank": 2},
+        {"name": "Steve Nash",     "team": "B", "rank": 2},
+        {"name": "Jen Adams",      "team": "B", "rank": 2},
+        # Gutter Sluts – rank 3
+        {"name": "Bob Johnson",    "team": "B", "rank": 3},
+        {"name": "Sue Taylor",     "team": "B", "rank": 3},
+        {"name": "Dan Brown",      "team": "B", "rank": 3},
+        # Gutter Sluts – rank 4
+        {"name": "Pat Green",      "team": "B", "rank": 4},
+        {"name": "Liz Moore",      "team": "B", "rank": 4},
+        {"name": "Sam Jackson",    "team": "B", "rank": 4},
+    ],
+}
+
 def _init():
     defs = {
         "players": [],          # [{"name","team","rank"}]
@@ -293,6 +332,13 @@ with tab_players:
     with c4:
         st.session_state.tee_interval = st.number_input("Mins Between Groups", 5, 30,
                                                           st.session_state.tee_interval)
+
+    if st.button("Load Sample Roster (Ultra Vagines vs Gutter Sluts)", use_container_width=True):
+        st.session_state.players = [dict(p) for p in SAMPLE_ROSTER["players"]]
+        st.session_state.name_a = SAMPLE_ROSTER["name_a"]
+        st.session_state.name_b = SAMPLE_ROSTER["name_b"]
+        st.session_state.pairings = {}
+        st.rerun()
 
     st.divider()
 
