@@ -125,6 +125,7 @@ def _init():
         "name_b": "Team B",
         "tee_start": "08:00",
         "tee_interval": 12,
+        "json_up_key": 0,        # incremented after each load to reset the file uploader
     }
     for k, v in defs.items():
         if k not in st.session_state:
@@ -484,14 +485,13 @@ with tab_players:
     # Team / tee settings
     c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
     with c1:
-        st.session_state.name_a = st.text_input("Team A name", st.session_state.name_a)
+        st.text_input("Team A name", key="name_a")
     with c2:
-        st.session_state.name_b = st.text_input("Team B name", st.session_state.name_b)
+        st.text_input("Team B name", key="name_b")
     with c3:
-        st.session_state.tee_start = st.text_input("First tee (HH:MM)", st.session_state.tee_start)
+        st.text_input("First tee (HH:MM)", key="tee_start")
     with c4:
-        st.session_state.tee_interval = st.number_input(
-            "Mins between groups", 5, 30, st.session_state.tee_interval)
+        st.number_input("Mins between groups", min_value=5, max_value=30, key="tee_interval")
 
     if st.button("Load sample roster  (Ultra Vagines vs Gutter Sluts)", width="stretch"):
         st.session_state.players       = [dict(p) for p in SAMPLE_ROSTER["players"]]
@@ -524,7 +524,10 @@ with tab_players:
         else:
             st.caption("No roster to save yet.")
     with col_ul:
-        roster_file = st.file_uploader("⬆  Load roster from JSON", type="json", key="json_up")
+        roster_file = st.file_uploader(
+            "⬆  Load roster from JSON", type="json",
+            key=f"json_up_{st.session_state.json_up_key}",
+        )
         if roster_file:
             try:
                 loaded = json.loads(roster_file.read())
@@ -533,6 +536,7 @@ with tab_players:
                 st.session_state.players        = loaded.get("players", [])
                 st.session_state.fixed_pairings = loaded.get("fixed_pairings", [])
                 st.session_state.pairings       = {}
+                st.session_state.json_up_key   += 1  # new key → uploader resets on next rerun
                 st.rerun()
             except Exception as e:
                 st.error(f"Could not load roster: {e}")
