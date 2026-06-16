@@ -333,7 +333,7 @@ with tab_players:
         st.session_state.tee_interval = st.number_input("Mins Between Groups", 5, 30,
                                                           st.session_state.tee_interval)
 
-    if st.button("Load Sample Roster (Ultra Vagines vs Gutter Sluts)", use_container_width=True):
+    if st.button("Load Sample Roster (Ultra Vagines vs Gutter Sluts)", width="stretch"):
         st.session_state.players = [dict(p) for p in SAMPLE_ROSTER["players"]]
         st.session_state.name_a = SAMPLE_ROSTER["name_a"]
         st.session_state.name_b = SAMPLE_ROSTER["name_b"]
@@ -416,7 +416,7 @@ with tab_players:
                             "Name": st.column_config.TextColumn("Name"),
                             "Rank": st.column_config.SelectboxColumn("Rank", options=[1, 2, 3, 4]),
                         },
-                        use_container_width=True,
+                        width="stretch",
                         num_rows="dynamic",
                         key=f"edit_{tid}",
                     )
@@ -450,7 +450,7 @@ with tab_pairings:
 
         c_gen, c_clr = st.columns([3, 1])
         with c_gen:
-            if st.button("Generate All 4 Rounds", type="primary", use_container_width=True):
+            if st.button("Generate All 4 Rounds", type="primary", width="stretch"):
                 with st.spinner("Optimising pairings…"):
                     st.session_state.pairings = {}
                     for r in range(1, 5):
@@ -459,7 +459,7 @@ with tab_pairings:
                             st.session_state.pairings[r] = groups
                 st.rerun()
         with c_clr:
-            if st.button("Clear Pairings", use_container_width=True):
+            if st.button("Clear Pairings", width="stretch"):
                 st.session_state.pairings = {}
                 st.rerun()
 
@@ -511,14 +511,14 @@ with tab_stats:
         opp_mat = np.zeros((n, n), dtype=int)
         same_group_mat = np.zeros((n, n), dtype=int)
 
-        for (p1, p2), cnt in partner_hist.items():
-            p1, p2 = tuple(p1)
+        for key, cnt in partner_hist.items():
+            p1, p2 = tuple(key)
             if p1 in idx and p2 in idx:
                 partner_mat[idx[p1]][idx[p2]] = cnt
                 partner_mat[idx[p2]][idx[p1]] = cnt
 
-        for (p1, p2), cnt in opp_hist.items():
-            p1, p2 = tuple(p1)
+        for key, cnt in opp_hist.items():
+            p1, p2 = tuple(key)
             if p1 in idx and p2 in idx:
                 opp_mat[idx[p1]][idx[p2]] = cnt
                 opp_mat[idx[p2]][idx[p1]] = cnt
@@ -555,7 +555,7 @@ with tab_stats:
             })
 
         df_stats = pd.DataFrame(player_stats).sort_values(["Team", "Rank"])
-        st.dataframe(df_stats, use_container_width=True, hide_index=True)
+        st.dataframe(df_stats, width="stretch", hide_index=True)
 
         st.divider()
 
@@ -589,7 +589,7 @@ with tab_stats:
             xaxis=dict(tickfont=dict(size=10)),
             yaxis=dict(tickfont=dict(size=10), autorange="reversed"),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         st.caption("0 = never paired · darker = more repeats. "
                    "Blue names = " + st.session_state.name_a +
                    " · Red names = " + st.session_state.name_b)
@@ -626,7 +626,7 @@ with tab_export:
                 })
 
         df_export = pd.DataFrame(rows)
-        st.dataframe(df_export, use_container_width=True)
+        st.dataframe(df_export, width="stretch")
 
         st.download_button(
             "Download CSV",
