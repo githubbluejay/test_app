@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <h1>OnRoto Highlighter</h1>
+    <label class="switch">
+      <input type="checkbox" id="enabled" />
+      <span class="slider"></span>
+    </label>
+  </header>
+
+  <div class="counts">
+    <div class="count"><span class="dot mine"></span><b id="c-mine">0</b> My roster</div>
+    <div class="count"><span class="dot freeagent"></span><b id="c-freeagent">0</b> Free agents</div>
+    <div class="count"><span class="dot taken"></span><b id="c-taken">0</b> Taken</div>
+  </div>
+
+  <div id="status" class="status">Loading…</div>
+
+  <button id="sync" class="primary">Sync now</button>
+  <p id="sync-hint" class="hint"></p>
+
+  <footer>
+    <a href="#" id="open-options">Settings</a>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

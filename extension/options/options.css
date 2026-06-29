@@ -1,0 +1,31 @@
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #1c2530;
+  background: #f4f6f8;
+  margin: 0;
+}
+main { max-width: 620px; margin: 0 auto; padding: 24px 20px 60px; }
+h1 { font-size: 20px; }
+h2 { font-size: 15px; margin-bottom: 8px; }
+section {
+  background: #fff; border: 1px solid #e2e7ec; border-radius: 8px;
+  padding: 16px; margin-bottom: 16px;
+}
+label { display: block; font-size: 13px; margin: 6px 0; }
+input[type="text"], textarea, select {
+  font: inherit; padding: 6px 8px; border: 1px solid #cbd3da; border-radius: 5px;
+  width: 100%; box-sizing: border-box; margin-top: 4px;
+}
+label.color { display: flex; align-items: center; justify-content: space-between; max-width: 240px; }
+label.color input { width: 44px; height: 28px; padding: 0; border: 0; background: none; }
+.hint { font-size: 12px; color: #6c7a89; }
+.addrow { display: flex; gap: 6px; align-items: center; }
+.addrow input.short { width: 70px; }
+.addrow select, .addrow button { font: inherit; padding: 6px; }
+ul#overrides { list-style: none; padding: 0; margin: 10px 0 0; }
+ul#overrides li { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-top: 1px solid #eef1f4; }
+ul#overrides button { border: 0; background: none; color: #c0392b; cursor: pointer; }
+.row { display: flex; align-items: center; gap: 12px; background: none; border: 0; padding: 0; }
+button.primary { background: #1b7f4b; color: #fff; border: 0; border-radius: 6px; padding: 9px 14px; font-weight: 600; cursor: pointer; }
+button.danger { background: #fff; color: #c0392b; border: 1px solid #e3b4ae; border-radius: 6px; padding: 9px 14px; cursor: pointer; }
+.saved { font-size: 13px; color: #1b7f4b; }

@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "OnRoto Fantasy Highlighter",
+  "version": "0.1.0",
+  "description": "Highlights MLB players on any site by their status in your OnRoto fantasy baseball league: on my roster, free agent, or taken by another team.",
+  "permissions": ["storage", "tabs", "scripting", "alarms"],
+  "host_permissions": [
+    "*://*.onroto.com/*",
+    "*://onroto.fangraphs.com/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "options/options.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.onroto.com/*", "*://onroto.fangraphs.com/*"],
+      "js": ["src/nameMatch.js", "src/storage.js", "src/onrotoScraper.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/nameMatch.js", "src/highlighter.js"],
+      "css": ["styles/highlight.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

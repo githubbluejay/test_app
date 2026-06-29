@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>OnRoto Highlighter — Settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main>
+    <h1>OnRoto Highlighter — Settings</h1>
+
+    <section>
+      <h2>League</h2>
+      <label>Your team / owner name (as it appears on OnRoto)
+        <input type="text" id="myTeam" placeholder="e.g. Bronx Bombers or your owner name" />
+      </label>
+      <p class="hint">Used to tell <em>your</em> roster apart from teams owned by others.</p>
+    </section>
+
+    <section>
+      <h2>Highlight colors</h2>
+      <label class="color">My roster <input type="color" id="col-mine" /></label>
+      <label class="color">Free agents <input type="color" id="col-freeagent" /></label>
+      <label class="color">Taken by others <input type="color" id="col-taken" /></label>
+    </section>
+
+    <section>
+      <h2>Where to highlight</h2>
+      <label><input type="radio" name="siteMode" value="all" /> Everywhere, except the sites below</label>
+      <label><input type="radio" name="siteMode" value="none" /> Only on the sites below</label>
+      <textarea id="siteList" rows="3" placeholder="one hostname per line, e.g. mail.google.com"></textarea>
+    </section>
+
+    <section>
+      <h2>Manual overrides</h2>
+      <p class="hint">Add or correct a player without re-syncing. Status: mine / freeagent / taken.</p>
+      <div class="addrow">
+        <input type="text" id="m-name" placeholder="Player name" />
+        <input type="text" id="m-team" placeholder="Team" class="short" />
+        <input type="text" id="m-pos" placeholder="Pos" class="short" />
+        <select id="m-status">
+          <option value="mine">mine</option>
+          <option value="freeagent">freeagent</option>
+          <option value="taken">taken</option>
+        </select>
+        <button id="m-add">Add</button>
+      </div>
+      <ul id="overrides"></ul>
+    </section>
+
+    <section class="row">
+      <button id="save" class="primary">Save settings</button>
+      <button id="clear" class="danger">Clear synced players</button>
+      <span id="saved" class="saved"></span>
+    </section>
+  </main>
+  <script src="../src/nameMatch.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
